@@ -1,4 +1,7 @@
 import { renderAsync } from 'https://cdn.jsdelivr.net/npm/docx-preview@0.3.6/+esm';
+import { getDocument, GlobalWorkerOptions } from '../node_modules/pdfjs-dist/legacy/build/pdf.mjs';
+
+GlobalWorkerOptions.workerSrc = new URL('../node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs', import.meta.url).toString();
 
 const docs = [];
 let active = null;
@@ -6,6 +9,8 @@ let filterQuery = '';
 const matchingDocs = new Set();
 const $ = (id) => document.getElementById(id);
 const isDocx = (file) => file.name.toLowerCase().endsWith('.docx');
+const isPdf = (file) => file.name.toLowerCase().endsWith('.pdf');
+const isSupported = (file) => isDocx(file) || isPdf(file);
 
 const documentHeading = document.querySelector('h4');
 documentHeading.innerHTML = '<span>DOCUMENTOS CARREGADOS</span><button id="clearDocuments" type="button" title="Remover todos os documentos" aria-label="Remover todos os documentos">×</button>';
@@ -30,7 +35,7 @@ contentFilter.addEventListener('input', () => {
   matchingDocs.clear();
   if (filterQuery) {
     for (const doc of docs) {
-      const content = doc.html.replace(/<[^>]*>/g, ' ');
+      const content = doc.type === 'pdf' ? doc.text : doc.html.replace(/<[^>]*>/g, ' ');
       if (content.toLocaleLowerCase().includes(filterQuery.toLocaleLowerCase())) matchingDocs.add(doc);
     }
   }
@@ -77,7 +82,7 @@ const headingAlignmentStyle = document.createElement('style');
 headingAlignmentStyle.textContent = '#clearDocuments{transform:translateX(8px)}';
 document.head.append(headingAlignmentStyle);
 const documentPaperStyle = document.createElement('style');
-documentPaperStyle.textContent = '.dark-mode .document-stage .docx-wrapper>section{background:#fff9dc!important}';
+documentPaperStyle.textContent = '.dark-mode .document-stage .docx-wrapper>section,.dark-mode .document-stage .pdf-page,.dark-mode .document-stage .pdf-page canvas{background:#fff9dc!important}.dark-mode .document-stage .pdf-page canvas{mix-blend-mode:multiply}';
 document.head.append(documentPaperStyle);
 let zoomLevel = 0;
 const zoomButton = document.createElement('button');
@@ -113,14 +118,37 @@ function msg(text) {
 }
 
 async function load(files, folder = false) {
-  const compatible = files.filter(isDocx);
+  const compatible = files.filter(isSupported);
   if (folder && !compatible.length) return msg('Nenhum arquivo compatível encontrado.');
-  if (!folder && compatible.length !== files.length) msg('Formato incompatível.');
+  if (!folder && compatible.length !== files.length) msg('Formato incompatível. Use arquivos DOCX ou PDF.');
   for (const file of compatible) {
     if (docs.some((doc) => doc.name === file.name && doc.size === file.size)) continue;
-    const temporary = document.createElement('div');
-    await renderAsync(await file.arrayBuffer(), temporary, undefined, { breakPages: true });
-    docs.push({ file, name: file.name, size: file.size, html: temporary.innerHTML });
+    try {
+      if (isPdf(file)) {
+        // Disable the worker because the renderer runs from a local Electron file URL.
+        const pdf = await getDocument({
+          data: new Uint8Array(await file.arrayBuffer()),
+          disableWorker: true,
+          useWorkerFetch: false,
+          isEvalSupported: false,
+        }).promise;
+        const textParts = [];
+        for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+          const page = await pdf.getPage(pageNumber);
+          const content = await page.getTextContent();
+          textParts.push(content.items.map((item) => item.str).join(' '));
+        }
+        docs.push({ file, name: file.name, size: file.size, type: 'pdf', pdf, text: textParts.join('\n') });
+      } else {
+        const temporary = document.createElement('div');
+        await renderAsync(await file.arrayBuffer(), temporary, undefined, { breakPages: true });
+        docs.push({ file, name: file.name, size: file.size, type: 'docx', html: temporary.innerHTML });
+      }
+    } catch (error) {
+      console.error(`Falha ao carregar ${file.name}:`, error);
+      const reason = error?.message ? ` ${error.message}` : '';
+      msg(`Não foi possível carregar ${file.name}.${reason}`);
+    }
   }
   renderList();
   if (!active && docs[0]) openDocument(docs[0]);
@@ -129,8 +157,8 @@ async function load(files, folder = false) {
 function renderList() {
   $('count').textContent = docs.length;
   $('list').innerHTML = docs.length
-    ? docs.map((doc, index) => `<div class="item ${doc === active ? 'active' : ''} ${matchingDocs.has(doc) ? 'content-match' : ''}" data-index="${index}"><button class="open-document" type="button"><span class="thumb">${doc.html}</span><span><b>${doc.name}</b><small>Documento DOCX</small></span></button><button class="close-document" type="button" title="Remover documento" aria-label="Remover ${doc.name}">×</button></div>`).join('')
-    : '<div class="empty">Nenhum documento<br><small>Adicione arquivos DOCX ou uma pasta.</small></div>';
+    ? docs.map((doc, index) => `<div class="item ${doc === active ? 'active' : ''} ${matchingDocs.has(doc) ? 'content-match' : ''}" data-index="${index}"><button class="open-document" type="button"><span class="thumb ${doc.type === 'pdf' ? 'pdf-thumb' : ''}">${doc.type === 'pdf' ? 'PDF' : doc.html}</span><span><b>${doc.name}</b><small>Documento ${doc.type.toUpperCase()}</small></span></button><button class="close-document" type="button" title="Remover documento" aria-label="Remover ${doc.name}">×</button></div>`).join('')
+    : '<div class="empty">Nenhum documento<br><small>Adicione arquivos DOCX, PDF ou uma pasta.</small></div>';
   document.querySelectorAll('.open-document').forEach((button) => {
     button.onclick = () => openDocument(docs[Number(button.parentElement.dataset.index)]);
   });
@@ -147,8 +175,28 @@ function openDocument(doc) {
   renderList();
 }
 
-function renderActiveDocument() {
+async function renderActiveDocument() {
   if (!active) return;
+  if (active.type === 'pdf') {
+    $('reader').innerHTML = '<div class="document-stage pdf-stage"><div class="loading">Carregando PDF…</div></div>';
+    const stage = $('reader').querySelector('.document-stage');
+    for (let pageNumber = 1; pageNumber <= active.pdf.numPages; pageNumber += 1) {
+      if (active !== docs.find((doc) => doc === active)) return;
+      const page = await active.pdf.getPage(pageNumber);
+      const viewport = page.getViewport({ scale: 1.35 });
+      const pageContainer = document.createElement('div');
+      pageContainer.className = 'pdf-page';
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      canvas.setAttribute('aria-label', `Página ${pageNumber}`);
+      pageContainer.append(canvas);
+      stage.append(pageContainer);
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    }
+    stage.querySelector('.loading')?.remove();
+    return;
+  }
   $('reader').innerHTML = `<div class="document-stage">${highlightContent(active.html)}</div>`;
 }
 
