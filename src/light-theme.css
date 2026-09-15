@@ -1,0 +1,59 @@
+/* Cloudy whites for the light theme. Keep geometry and dark mode unchanged. */
+body:not(.dark-mode) {
+  --light-paper: #e6e8e5;
+  --light-panel: #e1e4e5;
+  --light-workspace: #d9dde0;
+  --light-heading: #d9dfe4;
+  --light-border: #c5cdd4;
+  background: var(--light-panel);
+}
+
+body:not(.dark-mode) #app,
+body:not(.dark-mode) #reader,
+body:not(.dark-mode) .sheet-tabs {
+  background: var(--light-workspace);
+}
+
+body:not(.dark-mode) aside,
+body:not(.dark-mode) aside > header,
+body:not(.dark-mode) #top {
+  background: var(--light-panel);
+  border-color: var(--light-border);
+}
+
+body:not(.dark-mode) .item:not(.active),
+body:not(.dark-mode) .sheet-tab:not(.active):not(:hover),
+body:not(.dark-mode) .theme-toggle:not(:hover),
+body:not(.dark-mode) .zoom-toggle:not(:hover),
+body:not(.dark-mode) #contentFilter,
+body:not(.dark-mode) .loading-card,
+body:not(.dark-mode) .thumb {
+  background: var(--light-paper);
+}
+
+body:not(.dark-mode) .item.active {
+  background: #e5edf8;
+}
+
+body:not(.dark-mode) .sheet-content {
+  background: var(--light-paper);
+}
+
+body:not(.dark-mode) .sheet-content th {
+  background: var(--light-heading);
+}
+
+body:not(.dark-mode) .sheet-content td,
+body:not(.dark-mode) .sheet-content th {
+  border-color: var(--light-border);
+}
+
+body:not(.dark-mode) .document-stage .docx-wrapper > section,
+body:not(.dark-mode) .document-stage .pdf-page {
+  background: var(--light-paper) !important;
+}
+
+/* PDF pages contain painted white pixels; blend those into the paper tone. */
+body:not(.dark-mode) .document-stage .pdf-page canvas {
+  mix-blend-mode: multiply;
+}
