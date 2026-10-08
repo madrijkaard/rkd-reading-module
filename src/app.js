@@ -9,6 +9,9 @@ import DOMPurify from '../node_modules/dompurify/dist/purify.es.mjs';
 import { readMdUseCase } from './use_case/read_md_use_case.js';
 import { renderMdUseCase } from './use_case/render_md_use_case.js';
 import { centerHorizontalScrollUseCase } from './use_case/center_horizontal_scroll_use_case.js';
+import { renderPdfThumbnailUseCase } from './use_case/render_pdf_thumbnail_use_case.js';
+import { renderMdThumbnailUseCase } from './use_case/render_md_thumbnail_use_case.js';
+import { renderXlsxThumbnailUseCase } from './use_case/render_xlsx_thumbnail_use_case.js';
 
 GlobalWorkerOptions.workerSrc = new URL('../node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs', import.meta.url).toString();
 
@@ -17,6 +20,7 @@ let active = null;
 let filterQuery = '';
 const matchingDocs = new Set();
 let activeXlsxView = null;
+let thumbnailQueue = Promise.resolve();
 const $ = (id) => document.getElementById(id);
 const loadingOverlay = document.createElement('div');
 loadingOverlay.className = 'loading-overlay';
@@ -317,7 +321,9 @@ async function load(files, folder = false) {
           const content = await page.getTextContent();
           textParts.push(content.items.map((item) => item.str).join(' '));
         }
-        docs.push({ file, name: file.name, size: file.size, type: 'pdf', pdf, text: textParts.join('\n') });
+        const doc = { file, name: file.name, size: file.size, type: 'pdf', pdf, text: textParts.join('\n') };
+        docs.push(doc);
+        generateThumbnail(doc);
       } else if (isXlsx(file)) {
         setLoading(true, 2, `Abrindo ${file.name}…`);
         const sheets = await readXlsxUseCase({
@@ -325,14 +331,18 @@ async function load(files, folder = false) {
           workerUrl: new URL('./xlsx-worker.js', import.meta.url),
           onProgress: (value, text) => setLoading(true, value, text),
         });
-        docs.push({ file, name: file.name, size: file.size, type: 'xlsx', sheets, text: sheets.map((sheet) => `${sheet.name}\n${sheet.text}`).join('\n'), activeSheet: 0 });
+        const doc = { file, name: file.name, size: file.size, type: 'xlsx', sheets, text: sheets.map((sheet) => `${sheet.name}\n${sheet.text}`).join('\n'), activeSheet: 0 };
+        docs.push(doc);
+        generateThumbnail(doc);
       } else if (isMarkdown(file)) {
         const { html, text } = await readMdUseCase({
           file,
           parseMarkdown: (source) => marked.parse(source),
           sanitizeHtml: (dirty) => DOMPurify.sanitize(dirty),
         });
-        docs.push({ file, name: file.name, size: file.size, type: 'md', html, text });
+        const doc = { file, name: file.name, size: file.size, type: 'md', html, text };
+        docs.push(doc);
+        generateThumbnail(doc);
       } else {
         const temporary = document.createElement('div');
         await renderAsync(await file.arrayBuffer(), temporary, undefined, { breakPages: true });
@@ -353,7 +363,7 @@ async function load(files, folder = false) {
 function renderList() {
   $('count').textContent = docs.length;
   $('list').innerHTML = docs.length
-    ? docs.map((doc, index) => `<div class="item ${doc === active ? 'active' : ''} ${matchingDocs.has(doc) ? 'content-match' : ''}" data-index="${index}"><button class="open-document" type="button"><span class="thumb ${doc.type === 'pdf' ? 'pdf-thumb' : doc.type === 'xlsx' ? 'xlsx-thumb' : doc.type === 'md' ? 'md-thumb' : ''}">${doc.type === 'pdf' ? 'PDF' : doc.type === 'xlsx' ? 'XLSX' : doc.type === 'md' ? 'MD' : doc.html}</span><span><b>${escapeHtml(doc.name)}</b><small>Documento ${doc.type.toUpperCase()}</small></span></button><button class="close-document" type="button" title="Remover documento" aria-label="Remover documento">×</button></div>`).join('')
+    ? docs.map((doc, index) => `<div class="item ${doc === active ? 'active' : ''} ${matchingDocs.has(doc) ? 'content-match' : ''}" data-index="${index}"><button class="open-document" type="button">${thumbnailMarkup(doc)}<span><b>${escapeHtml(doc.name)}</b><small>Documento ${doc.type.toUpperCase()}</small></span></button><button class="close-document" type="button" title="Remover documento" aria-label="Remover documento">×</button></div>`).join('')
     : '<div class="empty">Nenhum documento<br><small>Adicione arquivos DOCX, PDF, XLSX, Markdown ou uma pasta.</small></div>';
   document.querySelectorAll('.open-document').forEach((button) => {
     button.onclick = () => openDocument(docs[Number(button.parentElement.dataset.index)]);
@@ -361,6 +371,37 @@ function renderList() {
   document.querySelectorAll('.close-document').forEach((button) => {
     button.onclick = (event) => { event.stopPropagation(); removeDocument(Number(button.parentElement.dataset.index)); };
   });
+}
+
+function thumbnailMarkup(doc) {
+  if (doc.type === 'docx') return `<span class="thumb ">${doc.html}</span>`;
+  if (doc.thumbnail?.status === 'ready') return `<span class="thumb thumb-ready ${doc.type}-thumb">${doc.thumbnail.html}</span>`;
+  const label = doc.type === 'pdf' ? 'PDF' : doc.type === 'xlsx' ? 'XLSX' : 'MD';
+  return `<span class="thumb ${doc.type}-thumb">${label}</span>`;
+}
+
+function generateThumbnail(doc) {
+  doc.thumbnail = { status: 'pending', html: '' };
+  thumbnailQueue = thumbnailQueue.then(async () => {
+    try {
+      let result;
+      if (doc.type === 'pdf') result = await renderPdfThumbnailUseCase({ pdf: doc.pdf, targetWidth: 96 });
+      else if (doc.type === 'md') result = renderMdThumbnailUseCase({ html: doc.html, maxBlocks: 12 });
+      else result = renderXlsxThumbnailUseCase({ sheets: doc.sheets, maxRows: 8, maxColumns: 4, maxCellLength: 24, escapeHtml });
+      doc.thumbnail = result.html ? { status: 'ready', html: result.html } : { status: 'error', html: '' };
+    } catch (error) {
+      doc.thumbnail = { status: 'error', html: '' };
+      console.warn(`Não foi possível gerar a miniatura de ${doc.name}:`, error);
+    }
+    updateListThumbnail(doc);
+  });
+}
+
+function updateListThumbnail(doc) {
+  const index = docs.indexOf(doc);
+  if (index === -1) return;
+  const thumb = $('list').querySelector(`.item[data-index="${index}"] .thumb`);
+  if (thumb) thumb.outerHTML = thumbnailMarkup(doc);
 }
 
 function openDocument(doc) {

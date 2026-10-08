@@ -74,3 +74,16 @@ body:not(.dark-mode) .md-stage .markdown-body td {
 body:not(.dark-mode) .md-stage .markdown-body tr:nth-child(2n) td {
   background: transparent;
 }
+
+body:not(.dark-mode) .thumb .xlsx-thumb-preview table {
+  background: var(--light-paper);
+}
+
+body:not(.dark-mode) .thumb .xlsx-thumb-preview th {
+  background: var(--light-heading);
+}
+
+body:not(.dark-mode) .thumb .xlsx-thumb-preview th,
+body:not(.dark-mode) .thumb .xlsx-thumb-preview td {
+  border-color: var(--light-border);
+}

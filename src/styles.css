@@ -35,3 +35,15 @@
 .dark-mode .md-stage .markdown-body th{background:#f3e9bf}
 .dark-mode .md-stage .markdown-body tr:nth-child(2n) td{background:#fbf2cf}
 .dark-mode .md-stage .markdown-body th,.dark-mode .md-stage .markdown-body td,.dark-mode .md-stage .markdown-body h1,.dark-mode .md-stage .markdown-body h2{border-color:#d9cc95}
+
+/* Miniaturas de PDF, Markdown e XLSX na lista lateral */
+.thumb.thumb-ready{display:block;place-items:normal}
+.thumb.thumb-ready>*{pointer-events:none}
+.thumb .thumb-image{display:block;width:100%;height:100%;object-fit:contain;object-position:top center;background:#fff}
+.thumb .md-thumb-preview,.thumb .xlsx-thumb-preview{width:384px;transform:scale(.12);transform-origin:top left}
+.thumb .md-thumb-preview .markdown-body{margin:0}
+.thumb .xlsx-thumb-preview table{width:100%;border-collapse:collapse;table-layout:fixed;background:#fff;color:#243244;font-size:13px}
+.thumb .xlsx-thumb-preview th,.thumb .xlsx-thumb-preview td{padding:4px 6px;border:1px solid #dfe4ea;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left}
+.thumb .xlsx-thumb-preview th{background:#f1f5fa;font-weight:700}
+.dark-mode .thumb .xlsx-thumb-preview table{background:#fff9dc}
+.dark-mode .thumb .xlsx-thumb-preview th{background:#dbe4ef}
