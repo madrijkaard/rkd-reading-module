@@ -8,6 +8,7 @@ import { marked } from '../node_modules/marked/lib/marked.esm.js';
 import DOMPurify from '../node_modules/dompurify/dist/purify.es.mjs';
 import { readMdUseCase } from './use_case/read_md_use_case.js';
 import { renderMdUseCase } from './use_case/render_md_use_case.js';
+import { centerHorizontalScrollUseCase } from './use_case/center_horizontal_scroll_use_case.js';
 
 GlobalWorkerOptions.workerSrc = new URL('../node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs', import.meta.url).toString();
 
@@ -140,6 +141,11 @@ const documentPaperStyle = document.createElement('style');
 documentPaperStyle.textContent = '.dark-mode .document-stage .docx-wrapper>section,.dark-mode .document-stage .pdf-page,.dark-mode .document-stage .pdf-page canvas,.dark-mode .document-stage .sheet-content,.dark-mode .document-stage .sheet-content th{background:#fff9dc!important}.dark-mode .document-stage .pdf-page canvas{mix-blend-mode:multiply}';
 document.head.append(documentPaperStyle);
 let zoomLevel = 0;
+const centeredZoomLevels = [1, 2];
+function centerReaderIfZoomed() {
+  if (!centeredZoomLevels.includes(zoomLevel) || !active || active.type === 'xlsx') return;
+  centerHorizontalScrollUseCase({ readerElement: $('reader') });
+}
 const zoomButton = document.createElement('button');
 zoomButton.className = 'zoom-toggle';
 zoomButton.type = 'button';
@@ -157,6 +163,7 @@ zoomButton.onclick = () => {
   zoomButton.textContent = `+ ${zoomLevel + 1}`;
   zoomButton.title = `Zoom ${zoomLevel + 1} de 3 (${percentages[zoomLevel]}%). Clique para o zoom ${(zoomLevel + 1) % 3 + 1}.`;
   zoomButton.setAttribute('aria-label', zoomButton.title);
+  centerReaderIfZoomed();
 };
 const zoomStyle = document.createElement('style');
 zoomStyle.textContent = `.zoom-toggle{width:42px;height:42px;margin-left:8px;border:1px solid #d6dfeb;border-radius:50%;background:#fff;color:#2867d4;cursor:pointer;font-size:25px;font-weight:400;line-height:1}.zoom-toggle:hover{background:#eef4ff;border-color:#8ab0ed}.zoom-fit{overflow-x:auto!important}.zoom-fit .document-stage{max-width:none;zoom:1.25}.zoom-fit .document-stage .docx-wrapper>section{width:100%!important;max-width:none!important}body:not(.dark-mode) .actions button{background:#2867d4;color:#fff;border-color:#2867d4}.dark-mode .zoom-toggle{background:#2a3543;color:#e8edf5;border-color:#526176}.dark-mode .zoom-toggle:hover{background:#3a4656}.xlsx-thumb{display:grid;place-items:center;color:#16864a;font-weight:800;font-size:10px}.spreadsheet-stage{padding:0 0 30px}.sheet-tabs{display:flex;gap:6px;flex-wrap:wrap;margin:0 auto 16px;max-width:1200px}.sheet-tab{border:1px solid #d4dce5;border-radius:6px;background:#fff;color:#415166;padding:8px 12px;cursor:pointer}.sheet-tab:hover,.sheet-tab.active{background:#2867d4;border-color:#2867d4;color:#fff}.sheet-content{max-width:1200px;margin:0 auto;overflow:auto;background:#fff;box-shadow:0 2px 10px #26384d1c}.sheet-content table{border-collapse:collapse;width:max-content;min-width:100%;font-size:12px}.sheet-content td,.sheet-content th{border:1px solid #dfe4ea;padding:7px 10px;min-width:80px;white-space:pre-wrap;vertical-align:top}.sheet-content th{background:#f1f5fa;color:#243244;font-weight:700}.dark-mode .sheet-content{box-shadow:0 2px 10px #0008}.dark-mode .sheet-content table,.dark-mode .sheet-content td{color:#243244}.dark-mode .sheet-tab{background:#2a3543;color:#e8edf5;border-color:#526176}.dark-mode .sheet-tab:hover,.dark-mode .sheet-tab.active{background:#2867d4;border-color:#5e91e6}.dark-mode .sheet-content th{background:#dbe4ef;color:#243244}`;
@@ -202,6 +209,7 @@ sidebarButton.onclick = () => {
     if (active?.type === 'xlsx' && viewport) {
       activeXlsxView?.redrawVisibleRows();
     }
+    centerReaderIfZoomed();
   });
 };
 $('top').append(zoomButton, sidebarButton, themeButton);
@@ -360,6 +368,7 @@ function openDocument(doc) {
   $('title').textContent = doc.name;
   $('top').querySelector('small').textContent = 'Visualização de documento';
   renderActiveDocument();
+  centerReaderIfZoomed();
   renderList();
 }
 
