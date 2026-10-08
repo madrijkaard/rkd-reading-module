@@ -2,6 +2,8 @@ import { renderAsync } from 'https://cdn.jsdelivr.net/npm/docx-preview@0.3.6/+es
 import { getDocument, GlobalWorkerOptions } from '../node_modules/pdfjs-dist/legacy/build/pdf.mjs';
 import { renderDocxUseCase } from './use_case/render_docx_use_case.js';
 import { renderPdfUseCase } from './use_case/render_pdf_use_case.js';
+import { readXlsxUseCase } from './use_case/read_xlsx_use_case.js';
+import { renderXlsxUseCase } from './use_case/render_xlsx_use_case.js';
 
 GlobalWorkerOptions.workerSrc = new URL('../node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs', import.meta.url).toString();
 
@@ -9,6 +11,7 @@ const docs = [];
 let active = null;
 let filterQuery = '';
 const matchingDocs = new Set();
+let activeXlsxView = null;
 const $ = (id) => document.getElementById(id);
 const loadingOverlay = document.createElement('div');
 loadingOverlay.className = 'loading-overlay';
@@ -189,7 +192,7 @@ sidebarButton.onclick = () => {
   requestAnimationFrame(() => {
     const viewport = $('reader').querySelector('.sheet-viewport');
     if (active?.type === 'xlsx' && viewport) {
-      renderVirtualRows(viewport, active.sheets[active.activeSheet]);
+      activeXlsxView?.redrawVisibleRows();
     }
   });
 };
@@ -301,7 +304,11 @@ async function load(files, folder = false) {
         docs.push({ file, name: file.name, size: file.size, type: 'pdf', pdf, text: textParts.join('\n') });
       } else if (isXlsx(file)) {
         setLoading(true, 2, `Abrindo ${file.name}…`);
-        const sheets = await readXlsxInWorker(file);
+        const sheets = await readXlsxUseCase({
+          file,
+          workerUrl: new URL('./xlsx-worker.js', import.meta.url),
+          onProgress: (value, text) => setLoading(true, value, text),
+        });
         docs.push({ file, name: file.name, size: file.size, type: 'xlsx', sheets, text: sheets.map((sheet) => `${sheet.name}\n${sheet.text}`).join('\n'), activeSheet: 0 });
       } else {
         const temporary = document.createElement('div');
@@ -344,26 +351,17 @@ function openDocument(doc) {
 async function renderActiveDocument() {
   if (!active) return;
   if (active.type === 'xlsx') {
-    const tabs = active.sheets.map((sheet, index) => `<button type="button" class="sheet-tab ${index === active.activeSheet ? 'active' : ''}" data-sheet-index="${index}">${escapeHtml(sheet.name)}</button>`).join('');
-    const sheet = active.sheets[active.activeSheet] || active.sheets[0];
-    $('reader').innerHTML = `<div class="document-stage spreadsheet-stage"><div class="sheet-tabs" role="tablist">${tabs}</div><div class="sheet-content">${renderVirtualSheet(sheet)}</div></div>`;
-    $('reader').querySelectorAll('.sheet-tab').forEach((button) => {
-      button.onclick = () => {
-        active.activeSheet = Number(button.dataset.sheetIndex);
+    activeXlsxView = renderXlsxUseCase({
+      sheets: active.sheets,
+      activeSheet: active.activeSheet,
+      filterQuery,
+      readerElement: $('reader'),
+      escapeHtml,
+      onSelectSheet: (index) => {
+        active.activeSheet = index;
         renderActiveDocument();
-      };
+      },
     });
-    const viewport = $('reader').querySelector('.sheet-viewport');
-    let scheduled = false;
-    viewport.addEventListener('scroll', () => {
-      if (scheduled) return;
-      scheduled = true;
-      requestAnimationFrame(() => {
-        scheduled = false;
-        renderVirtualRows(viewport, sheet);
-      });
-    });
-    renderVirtualRows(viewport, sheet);
     return;
   }
   if (active.type === 'pdf') {
@@ -379,76 +377,6 @@ async function renderActiveDocument() {
     html: active.html,
     filterQuery,
     readerElement: $('reader'),
-  });
-}
-
-const spreadsheetRowHeight = 34;
-const spreadsheetOverscan = 12;
-
-function renderVirtualSheet(sheet) {
-  const rows = sheet.rows || [];
-  const columnCount = Math.max(1, ...rows.map((row) => row.length));
-  const header = rows[0] || [];
-  const widths = getSpreadsheetColumnWidths(rows, columnCount);
-  const colgroup = widths.map((width) => `<col style="width:${width}px">`).join('');
-  const headerCells = Array.from({ length: columnCount }, (_, index) => `<th scope="col">${highlightCell(header[index] ?? '')}</th>`).join('');
-  return `<div class="sheet-viewport"><table class="virtual-sheet"><colgroup>${colgroup}</colgroup><thead><tr>${headerCells}</tr></thead><tbody></tbody></table></div>`;
-}
-
-function renderVirtualRows(viewport, sheet) {
-  const rows = sheet.rows || [];
-  const dataRows = rows.slice(1);
-  const tableBody = viewport.querySelector('tbody');
-  if (!tableBody) return;
-  const columnCount = Math.max(1, ...rows.map((row) => row.length));
-  const firstVisible = Math.floor(viewport.scrollTop / spreadsheetRowHeight);
-  const visibleCount = Math.ceil(viewport.clientHeight / spreadsheetRowHeight) + spreadsheetOverscan * 2;
-  const start = Math.max(0, firstVisible - spreadsheetOverscan);
-  const end = Math.min(dataRows.length, start + visibleCount);
-  const topHeight = start * spreadsheetRowHeight;
-  const bottomHeight = Math.max(0, (dataRows.length - end) * spreadsheetRowHeight);
-  const topRow = `<tr class="sheet-spacer" aria-hidden="true"><td colspan="${columnCount}" style="height:${topHeight}px"></td></tr>`;
-  const visibleRows = dataRows.slice(start, end).map((row, rowIndex) => `<tr>${Array.from({ length: columnCount }, (_, index) => `<td title="${escapeHtml(row[index] ?? '')}">${highlightCell(row[index] ?? '')}</td>`).join('')}</tr>`).join('');
-  const bottomRow = `<tr class="sheet-spacer" aria-hidden="true"><td colspan="${columnCount}" style="height:${bottomHeight}px"></td></tr>`;
-  tableBody.innerHTML = topRow + visibleRows + bottomRow;
-}
-
-function getSpreadsheetColumnWidths(rows, columnCount) {
-  return Array.from({ length: columnCount }, (_, columnIndex) => {
-    const longest = rows.slice(0, 100).reduce((length, row) => Math.max(length, String(row[columnIndex] ?? '').length), 0);
-    return Math.max(100, Math.min(360, 24 + longest * 8));
-  });
-}
-
-function highlightCell(value) {
-  const escapedValue = escapeHtml(value);
-  if (!filterQuery) return escapedValue;
-  const escapedQuery = escapeHtml(filterQuery).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return escapedValue.replace(new RegExp(escapedQuery, 'gi'), (match) => `<mark class="content-highlight">${match}</mark>`);
-}
-
-function readXlsxInWorker(file) {
-  return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL('./xlsx-worker.js', import.meta.url), { type: 'module' });
-    worker.onmessage = ({ data }) => {
-      if (data.type === 'progress') setLoading(true, data.value, data.text);
-      if (data.type === 'complete') {
-        worker.terminate();
-        resolve(data.sheets);
-      }
-      if (data.type === 'error') {
-        worker.terminate();
-        reject(new Error(data.message));
-      }
-    };
-    worker.onerror = (error) => {
-      worker.terminate();
-      reject(error.error || new Error('Falha ao processar a planilha.'));
-    };
-    file.arrayBuffer().then((buffer) => worker.postMessage({ buffer }, [buffer])).catch((error) => {
-      worker.terminate();
-      reject(error);
-    });
   });
 }
 
