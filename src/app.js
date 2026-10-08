@@ -1,5 +1,7 @@
 import { renderAsync } from 'https://cdn.jsdelivr.net/npm/docx-preview@0.3.6/+esm';
 import { getDocument, GlobalWorkerOptions } from '../node_modules/pdfjs-dist/legacy/build/pdf.mjs';
+import { renderDocxUseCase } from './use_case/render_docx_use_case.js';
+import { renderPdfUseCase } from './use_case/render_pdf_use_case.js';
 
 GlobalWorkerOptions.workerSrc = new URL('../node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs', import.meta.url).toString();
 
@@ -365,56 +367,19 @@ async function renderActiveDocument() {
     return;
   }
   if (active.type === 'pdf') {
-    $('reader').innerHTML = '<div class="document-stage pdf-stage"><div class="loading">Carregando PDF…</div></div>';
-    const stage = $('reader').querySelector('.document-stage');
-    for (let pageNumber = 1; pageNumber <= active.pdf.numPages; pageNumber += 1) {
-      if (active !== docs.find((doc) => doc === active)) return;
-      const page = await active.pdf.getPage(pageNumber);
-      const viewport = page.getViewport({ scale: 1.35 });
-      const pageContainer = document.createElement('div');
-      pageContainer.className = 'pdf-page';
-      const canvas = document.createElement('canvas');
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      canvas.setAttribute('aria-label', `Página ${pageNumber}`);
-      pageContainer.append(canvas);
-      stage.append(pageContainer);
-      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-    }
-    stage.querySelector('.loading')?.remove();
+    await renderPdfUseCase({
+      pdf: active.pdf,
+      readerElement: $('reader'),
+      scale: 1.35,
+      shouldContinue: () => active === docs.find((doc) => doc === active),
+    });
     return;
   }
-  $('reader').innerHTML = `<div class="document-stage docx-stage">${highlightContent(active.html)}</div>`;
-}
-
-function highlightContent(html) {
-  if (!filterQuery) return html;
-  const container = document.createElement('div');
-  container.innerHTML = html;
-  const escaped = filterQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = new RegExp(escaped, 'gi');
-  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-  const textNodes = [];
-  let node;
-  while ((node = walker.nextNode())) textNodes.push(node);
-  for (const textNode of textNodes) {
-    if (!textNode.nodeValue || !pattern.test(textNode.nodeValue)) { pattern.lastIndex = 0; continue; }
-    pattern.lastIndex = 0;
-    const fragment = document.createDocumentFragment();
-    let lastIndex = 0;
-    textNode.nodeValue.replace(pattern, (match, offset) => {
-      fragment.append(document.createTextNode(textNode.nodeValue.slice(lastIndex, offset)));
-      const mark = document.createElement('mark');
-      mark.className = 'content-highlight';
-      mark.textContent = match;
-      fragment.append(mark);
-      lastIndex = offset + match.length;
-      return match;
-    });
-    fragment.append(document.createTextNode(textNode.nodeValue.slice(lastIndex)));
-    textNode.parentNode.replaceChild(fragment, textNode);
-  }
-  return container.innerHTML;
+  await renderDocxUseCase({
+    html: active.html,
+    filterQuery,
+    readerElement: $('reader'),
+  });
 }
 
 const spreadsheetRowHeight = 34;
