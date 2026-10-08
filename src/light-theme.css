@@ -57,3 +57,20 @@ body:not(.dark-mode) .document-stage .pdf-page {
 body:not(.dark-mode) .document-stage .pdf-page canvas {
   mix-blend-mode: multiply;
 }
+
+body:not(.dark-mode) .md-stage .markdown-body {
+  background: var(--light-paper) !important;
+}
+
+body:not(.dark-mode) .md-stage .markdown-body th {
+  background: var(--light-heading);
+}
+
+body:not(.dark-mode) .md-stage .markdown-body th,
+body:not(.dark-mode) .md-stage .markdown-body td {
+  border-color: var(--light-border);
+}
+
+body:not(.dark-mode) .md-stage .markdown-body tr:nth-child(2n) td {
+  background: transparent;
+}
