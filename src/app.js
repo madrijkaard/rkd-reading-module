@@ -12,6 +12,11 @@ import { centerHorizontalScrollUseCase } from './use_case/center_horizontal_scro
 import { renderPdfThumbnailUseCase } from './use_case/render_pdf_thumbnail_use_case.js';
 import { renderMdThumbnailUseCase } from './use_case/render_md_thumbnail_use_case.js';
 import { renderXlsxThumbnailUseCase } from './use_case/render_xlsx_thumbnail_use_case.js';
+import { readHtmlUseCase } from './use_case/read_html_use_case.js';
+import { resolveHtmlResourcesUseCase } from './use_case/resolve_html_resources_use_case.js';
+import { highlightHtmlDocumentUseCase } from './use_case/highlight_html_document_use_case.js';
+import { renderHtmlUseCase } from './use_case/render_html_use_case.js';
+import { renderHtmlThumbnailUseCase } from './use_case/render_html_thumbnail_use_case.js';
 
 GlobalWorkerOptions.workerSrc = new URL('../node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs', import.meta.url).toString();
 
@@ -40,7 +45,11 @@ const isMarkdown = (file) => {
   const name = file.name.toLowerCase();
   return name.endsWith('.md') || name.endsWith('.markdown');
 };
-const isSupported = (file) => isDocx(file) || isPdf(file) || isXlsx(file) || isMarkdown(file);
+const isHtml = (file) => {
+  const name = file.name.toLowerCase();
+  return name.endsWith('.html') || name.endsWith('.htm');
+};
+const isSupported = (file) => isDocx(file) || isPdf(file) || isXlsx(file) || isMarkdown(file) || isHtml(file);
 
 const documentHeading = document.querySelector('h4');
 documentHeading.innerHTML = '<span>DOCUMENTOS CARREGADOS</span><button id="clearDocuments" type="button" title="Remover todos os documentos" aria-label="Remover todos os documentos">×</button>';
@@ -53,7 +62,7 @@ clearDocumentsButton.onclick = () => {
   contentFilter.value = '';
   $('title').textContent = 'Nenhum documento selecionado';
   $('top').querySelector('small').textContent = 'Selecione um documento na lista';
-  $('reader').innerHTML = '<div class="welcome"><div class="bigLogo">R</div><h1>Seu espaço de leitura</h1><p>Carregue um ou mais documentos DOCX, PDF, XLSX ou Markdown para visualizar os arquivos aqui.</p></div>';
+  $('reader').innerHTML = '<div class="welcome"><div class="bigLogo">R</div><h1>Seu espaço de leitura</h1><p>Carregue um ou mais documentos DOCX, PDF, XLSX, Markdown ou HTML para visualizar os arquivos aqui.</p></div>';
   renderList();
 };
 
@@ -72,7 +81,7 @@ contentFilter.addEventListener('input', () => {
   matchingDocs.clear();
   if (filterQuery) {
     for (const doc of docs) {
-      const content = doc.type === 'pdf' || doc.type === 'xlsx' || doc.type === 'md' ? doc.text : doc.html.replace(/<[^>]*>/g, ' ');
+      const content = doc.type === 'pdf' || doc.type === 'xlsx' || doc.type === 'md' || doc.type === 'html' ? doc.text : doc.html.replace(/<[^>]*>/g, ' ');
       if (content.toLocaleLowerCase().includes(filterQuery.toLocaleLowerCase())) matchingDocs.add(doc);
     }
   }
@@ -301,9 +310,10 @@ function msg(text) {
 }
 
 async function load(files, folder = false) {
+  const resourceFiles = new Map(folder ? files.map((file) => [file.webkitRelativePath || file.name, file]) : []);
   const compatible = files.filter(isSupported);
   if (folder && !compatible.length) return msg('Nenhum arquivo compatível encontrado.');
-  if (!folder && compatible.length !== files.length) msg('Formato incompatível. Use arquivos DOCX, PDF, XLSX ou Markdown.');
+  if (!folder && compatible.length !== files.length) msg('Formato incompatível. Use arquivos DOCX, PDF, XLSX, Markdown ou HTML.');
   for (const file of compatible) {
     if (docs.some((doc) => doc.name === file.name && doc.size === file.size)) continue;
     try {
@@ -343,6 +353,13 @@ async function load(files, folder = false) {
         const doc = { file, name: file.name, size: file.size, type: 'md', html, text };
         docs.push(doc);
         generateThumbnail(doc);
+      } else if (isHtml(file)) {
+        const { source, text } = await readHtmlUseCase({ file });
+        const { html, blocked } = await resolveHtmlResourcesUseCase({ source, htmlPath: file.webkitRelativePath || file.name, resourceFiles });
+        if (blocked.length) console.info(`${file.name}: ${blocked.length} recurso(s) não carregado(s)`, blocked);
+        const doc = { file, name: file.name, size: file.size, type: 'html', html, text };
+        docs.push(doc);
+        generateThumbnail(doc);
       } else {
         const temporary = document.createElement('div');
         await renderAsync(await file.arrayBuffer(), temporary, undefined, { breakPages: true });
@@ -364,7 +381,7 @@ function renderList() {
   $('count').textContent = docs.length;
   $('list').innerHTML = docs.length
     ? docs.map((doc, index) => `<div class="item ${doc === active ? 'active' : ''} ${matchingDocs.has(doc) ? 'content-match' : ''}" data-index="${index}"><button class="open-document" type="button">${thumbnailMarkup(doc)}<span><b>${escapeHtml(doc.name)}</b><small>Documento ${doc.type.toUpperCase()}</small></span></button><button class="close-document" type="button" title="Remover documento" aria-label="Remover documento">×</button></div>`).join('')
-    : '<div class="empty">Nenhum documento<br><small>Adicione arquivos DOCX, PDF, XLSX, Markdown ou uma pasta.</small></div>';
+    : '<div class="empty">Nenhum documento<br><small>Adicione arquivos DOCX, PDF, XLSX, Markdown, HTML ou uma pasta.</small></div>';
   document.querySelectorAll('.open-document').forEach((button) => {
     button.onclick = () => openDocument(docs[Number(button.parentElement.dataset.index)]);
   });
@@ -376,7 +393,7 @@ function renderList() {
 function thumbnailMarkup(doc) {
   if (doc.type === 'docx') return `<span class="thumb ">${doc.html}</span>`;
   if (doc.thumbnail?.status === 'ready') return `<span class="thumb thumb-ready ${doc.type}-thumb">${doc.thumbnail.html}</span>`;
-  const label = doc.type === 'pdf' ? 'PDF' : doc.type === 'xlsx' ? 'XLSX' : 'MD';
+  const label = { pdf: 'PDF', xlsx: 'XLSX', md: 'MD', html: 'HTML' }[doc.type];
   return `<span class="thumb ${doc.type}-thumb">${label}</span>`;
 }
 
@@ -387,6 +404,7 @@ function generateThumbnail(doc) {
       let result;
       if (doc.type === 'pdf') result = await renderPdfThumbnailUseCase({ pdf: doc.pdf, targetWidth: 96 });
       else if (doc.type === 'md') result = renderMdThumbnailUseCase({ html: doc.html, maxBlocks: 12 });
+      else if (doc.type === 'html') result = await renderHtmlThumbnailUseCase({ html: doc.html, pageWidth: 800, pageHeight: 1000, targetWidth: 96, maxSourceLength: 8_000_000 });
       else result = renderXlsxThumbnailUseCase({ sheets: doc.sheets, maxRows: 8, maxColumns: 4, maxCellLength: 24, escapeHtml });
       doc.thumbnail = result.html ? { status: 'ready', html: result.html } : { status: 'error', html: '' };
     } catch (error) {
@@ -446,6 +464,22 @@ async function renderActiveDocument() {
     });
     return;
   }
+  if (active.type === 'html') {
+    renderHtmlUseCase({
+      html: active.html,
+      filterQuery,
+      readerElement: $('reader'),
+      highlightDocument: highlightHtmlDocumentUseCase,
+      onOpenExternal: (url) => window.open(url, '_blank', 'noopener'),
+      onSelectText: (text) => {
+        contentFilter.value = text;
+        contentFilter.dispatchEvent(new Event('input', { bubbles: true }));
+        contentFilter.focus();
+      },
+      onFirstLayout: centerReaderIfZoomed,
+    });
+    return;
+  }
   await renderDocxUseCase({
     html: active.html,
     filterQuery,
@@ -465,7 +499,7 @@ function removeDocument(index) {
     active = null;
     $('title').textContent = 'Nenhum documento selecionado';
     $('top').querySelector('small').textContent = 'Selecione um documento na lista';
-    $('reader').innerHTML = '<div class="welcome"><div class="bigLogo">D</div><h1>Seu espaço de leitura</h1><p>Carregue um ou mais documentos DOCX, PDF, XLSX ou Markdown para visualizar os arquivos aqui.</p></div>';
+    $('reader').innerHTML = '<div class="welcome"><div class="bigLogo">D</div><h1>Seu espaço de leitura</h1><p>Carregue um ou mais documentos DOCX, PDF, XLSX, Markdown ou HTML para visualizar os arquivos aqui.</p></div>';
   }
   renderList();
 }
