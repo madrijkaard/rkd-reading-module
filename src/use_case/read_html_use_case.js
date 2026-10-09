@@ -15,12 +15,23 @@ function decode(bytes, label) {
   }
 }
 
+const JAVASCRIPT_TYPES = /^(?:|module|(?:text|application)\/(?:x-)?(?:java|ecma)script|text\/(?:jscript|livescript)|text\/javascript1\.[0-5])$/i;
+
+function detectScripts(parsed) {
+  const executableScript = [...parsed.querySelectorAll('script')].some((script) => JAVASCRIPT_TYPES.test((script.getAttribute('type') || '').trim()));
+  if (executableScript) return true;
+  return [...parsed.querySelectorAll('*')].some((element) => [...element.attributes].some((attribute) => (
+    /^on/i.test(attribute.name) || (/^(?:href|src|action|formaction)$/i.test(attribute.name) && /^\s*javascript:/i.test(attribute.value))
+  )));
+}
+
 export async function readHtmlUseCase({ file }) {
   const bytes = new Uint8Array(await file.arrayBuffer());
   const source = decode(bytes, detectEncoding(bytes));
   const parsed = new DOMParser().parseFromString(source, 'text/html');
+  const hasScripts = detectScripts(parsed);
   parsed.querySelectorAll('script, style, template').forEach((element) => element.remove());
   parsed.head?.remove();
   const text = (parsed.body?.textContent || '').replace(/\s+/g, ' ').trim();
-  return { source, text };
+  return { source, text, hasScripts };
 }

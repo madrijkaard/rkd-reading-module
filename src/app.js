@@ -17,6 +17,9 @@ import { resolveHtmlResourcesUseCase } from './use_case/resolve_html_resources_u
 import { highlightHtmlDocumentUseCase } from './use_case/highlight_html_document_use_case.js';
 import { renderHtmlUseCase } from './use_case/render_html_use_case.js';
 import { renderHtmlThumbnailUseCase } from './use_case/render_html_thumbnail_use_case.js';
+import { injectHtmlBridgeUseCase } from './use_case/inject_html_bridge_use_case.js';
+import { renderInteractiveHtmlUseCase } from './use_case/render_interactive_html_use_case.js';
+import { confirmExternalLinkUseCase } from './use_case/confirm_external_link_use_case.js';
 
 GlobalWorkerOptions.workerSrc = new URL('../node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs', import.meta.url).toString();
 
@@ -63,6 +66,7 @@ clearDocumentsButton.onclick = () => {
   $('title').textContent = 'Nenhum documento selecionado';
   $('top').querySelector('small').textContent = 'Selecione um documento na lista';
   $('reader').innerHTML = '<div class="welcome"><div class="bigLogo">R</div><h1>Seu espaço de leitura</h1><p>Carregue um ou mais documentos DOCX, PDF, XLSX, Markdown ou HTML para visualizar os arquivos aqui.</p></div>';
+  updateInteractivityButton();
   renderList();
 };
 
@@ -81,7 +85,9 @@ contentFilter.addEventListener('input', () => {
   matchingDocs.clear();
   if (filterQuery) {
     for (const doc of docs) {
-      const content = doc.type === 'pdf' || doc.type === 'xlsx' || doc.type === 'md' || doc.type === 'html' ? doc.text : doc.html.replace(/<[^>]*>/g, ' ');
+      const content = doc.type === 'html'
+        ? `${doc.text}\n${doc.renderedText || ''}`
+        : doc.type === 'pdf' || doc.type === 'xlsx' || doc.type === 'md' ? doc.text : doc.html.replace(/<[^>]*>/g, ' ');
       if (content.toLocaleLowerCase().includes(filterQuery.toLocaleLowerCase())) matchingDocs.add(doc);
     }
   }
@@ -225,7 +231,27 @@ sidebarButton.onclick = () => {
     centerReaderIfZoomed();
   });
 };
-$('top').append(zoomButton, sidebarButton, themeButton);
+const interactivityButton = document.createElement('button');
+interactivityButton.className = 'interactivity-toggle';
+interactivityButton.type = 'button';
+interactivityButton.hidden = true;
+interactivityButton.onclick = () => {
+  if (active?.type !== 'html' || !active.hasScripts) return;
+  active.interactive = !active.interactive;
+  updateInteractivityButton();
+  renderActiveDocument();
+};
+function updateInteractivityButton() {
+  const available = active?.type === 'html' && active.hasScripts;
+  const on = Boolean(available && active.interactive);
+  interactivityButton.hidden = !available;
+  interactivityButton.classList.toggle('on', on);
+  interactivityButton.textContent = on ? '■ Estático' : '▶ Interativo';
+  interactivityButton.title = on ? 'Voltar ao modo estático' : 'Ativar interatividade (executa os scripts da página isolados e sem internet)';
+  interactivityButton.setAttribute('aria-label', interactivityButton.title);
+  interactivityButton.setAttribute('aria-pressed', String(on));
+}
+$('top').append(interactivityButton, zoomButton, sidebarButton, themeButton);
 const buttonLayoutStyle = document.createElement('style');
 buttonLayoutStyle.textContent = '.zoom-toggle{margin-left:auto!important}.theme-toggle{margin-left:8px!important}';
 buttonLayoutStyle.textContent += `
@@ -354,10 +380,14 @@ async function load(files, folder = false) {
         docs.push(doc);
         generateThumbnail(doc);
       } else if (isHtml(file)) {
-        const { source, text } = await readHtmlUseCase({ file });
+        const { source, text, hasScripts } = await readHtmlUseCase({ file });
         const { html, blocked } = await resolveHtmlResourcesUseCase({ source, htmlPath: file.webkitRelativePath || file.name, resourceFiles });
         if (blocked.length) console.info(`${file.name}: ${blocked.length} recurso(s) não carregado(s)`, blocked);
-        const doc = { file, name: file.name, size: file.size, type: 'html', html, text };
+        const doc = { file, name: file.name, size: file.size, type: 'html', html, text, hasScripts, interactive: false };
+        if (hasScripts) {
+          doc.source = source;
+          doc.resourceFiles = resourceFiles;
+        }
         docs.push(doc);
         generateThumbnail(doc);
       } else {
@@ -426,6 +456,7 @@ function openDocument(doc) {
   active = doc;
   $('title').textContent = doc.name;
   $('top').querySelector('small').textContent = 'Visualização de documento';
+  updateInteractivityButton();
   renderActiveDocument();
   centerReaderIfZoomed();
   renderList();
@@ -461,6 +492,39 @@ async function renderActiveDocument() {
       html: active.html,
       filterQuery,
       readerElement: $('reader'),
+    });
+    return;
+  }
+  if (active.type === 'html' && active.interactive) {
+    const doc = active;
+    if (!doc.interactiveHtml) {
+      const { html } = await resolveHtmlResourcesUseCase({
+        source: doc.source,
+        htmlPath: doc.file.webkitRelativePath || doc.file.name,
+        resourceFiles: doc.resourceFiles || new Map(),
+        scripts: 'keep',
+      });
+      doc.interactiveHtml = html;
+    }
+    if (active !== doc || !doc.interactive) return;
+    renderInteractiveHtmlUseCase({
+      html: doc.interactiveHtml,
+      filterQuery,
+      readerElement: $('reader'),
+      injectBridge: injectHtmlBridgeUseCase,
+      createNonce: () => crypto.randomUUID(),
+      onReady: (text) => { doc.renderedText = text; },
+      onOpenExternalRequest: (url) => confirmExternalLinkUseCase({
+        url,
+        containerElement: $('top'),
+        timeoutMs: 10000,
+        onConfirm: (href) => window.open(href, '_blank', 'noopener'),
+      }),
+      onSelectText: (text) => {
+        contentFilter.value = text;
+        contentFilter.dispatchEvent(new Event('input', { bubbles: true }));
+        contentFilter.focus();
+      },
     });
     return;
   }
@@ -501,6 +565,7 @@ function removeDocument(index) {
     $('top').querySelector('small').textContent = 'Selecione um documento na lista';
     $('reader').innerHTML = '<div class="welcome"><div class="bigLogo">D</div><h1>Seu espaço de leitura</h1><p>Carregue um ou mais documentos DOCX, PDF, XLSX, Markdown ou HTML para visualizar os arquivos aqui.</p></div>';
   }
+  updateInteractivityButton();
   renderList();
 }
 

@@ -1,7 +1,8 @@
 const CONTENT_SECURITY_POLICY = "default-src 'none'; img-src data:; style-src 'unsafe-inline' data:; font-src data:; media-src data:";
+const INTERACTIVE_CONTENT_SECURITY_POLICY = "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' data:; style-src 'unsafe-inline' data:; img-src data: blob:; font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'";
 const MIME_BY_EXTENSION = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
-  bmp: 'image/bmp', ico: 'image/x-icon', woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf', css: 'text/css',
+  bmp: 'image/bmp', ico: 'image/x-icon', woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf', css: 'text/css', js: 'text/javascript', mjs: 'text/javascript',
 };
 const MAX_IMPORT_DEPTH = 5;
 
@@ -17,7 +18,8 @@ function readAsDataUrl(file) {
   });
 }
 
-export async function resolveHtmlResourcesUseCase({ source, htmlPath, resourceFiles }) {
+export async function resolveHtmlResourcesUseCase({ source, htmlPath, resourceFiles, scripts = 'remove' }) {
+  const keepScripts = scripts === 'keep';
   const resolved = [];
   const blocked = [];
   const dataUrls = new Map();
@@ -130,11 +132,13 @@ export async function resolveHtmlResourcesUseCase({ source, htmlPath, resourceFi
   }
 
   const parsed = new DOMParser().parseFromString(source, 'text/html');
-  parsed.querySelectorAll('script, base, meta[http-equiv="refresh" i]').forEach((element) => element.remove());
-  // Inline handlers never run in the sandbox; removing them avoids Chromium's "Blocked script execution" console error.
-  parsed.querySelectorAll('*').forEach((element) => {
-    [...element.attributes].filter((attribute) => /^on/i.test(attribute.name)).forEach((attribute) => element.removeAttribute(attribute.name));
-  });
+  parsed.querySelectorAll(keepScripts ? 'base, meta[http-equiv="refresh" i]' : 'script, base, meta[http-equiv="refresh" i]').forEach((element) => element.remove());
+  if (!keepScripts) {
+    // Inline handlers never run in the sandbox; removing them avoids Chromium's "Blocked script execution" console error.
+    parsed.querySelectorAll('*').forEach((element) => {
+      [...element.attributes].filter((attribute) => /^on/i.test(attribute.name)).forEach((attribute) => element.removeAttribute(attribute.name));
+    });
+  }
   parsed.querySelectorAll('link').forEach((link) => {
     const rel = (link.getAttribute('rel') || '').toLowerCase().split(/\s+/);
     if (!rel.includes('stylesheet')) link.remove();
@@ -154,6 +158,13 @@ export async function resolveHtmlResourcesUseCase({ source, htmlPath, resourceFi
     if (element.hasAttribute('xlink:href')) tasks.push(resolveAttribute(element, 'xlink:href'));
   });
   parsed.querySelectorAll('img[srcset], source[srcset]').forEach((element) => tasks.push(resolveSrcset(element)));
+  if (keepScripts) {
+    parsed.querySelectorAll('script[src]').forEach((script) => tasks.push((async () => {
+      const value = await resolveReference(script.getAttribute('src'), htmlPath);
+      if (value) script.setAttribute('src', value);
+      else script.remove();
+    })()));
+  }
   parsed.querySelectorAll('link').forEach((link) => tasks.push((async () => {
     const reference = link.getAttribute('href') || '';
     const found = isAbsolute(reference) ? null : findFile(reference, htmlPath);
@@ -186,7 +197,7 @@ export async function resolveHtmlResourcesUseCase({ source, htmlPath, resourceFi
 
   const csp = parsed.createElement('meta');
   csp.setAttribute('http-equiv', 'Content-Security-Policy');
-  csp.setAttribute('content', CONTENT_SECURITY_POLICY);
+  csp.setAttribute('content', keepScripts ? INTERACTIVE_CONTENT_SECURITY_POLICY : CONTENT_SECURITY_POLICY);
   parsed.head.prepend(csp);
 
   const { doctype } = parsed;

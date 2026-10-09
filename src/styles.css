@@ -54,3 +54,26 @@
 #reader:has(.html-stage){overflow-x:auto}
 .dark-mode .html-frame{box-shadow:0 2px 10px #0008}
 .html-thumb{display:grid;place-items:center;color:#c2571a;font-weight:800;font-size:10px}
+
+/* HTML interativo: iframe isolado com rolagem própria, botão de interatividade e confirmação de link externo */
+.html-frame.interactive{height:auto}
+#reader:has(.html-stage.interactive){overflow:hidden}
+.dark-mode .html-frame.interactive{color-scheme:dark}
+#top{position:relative}
+.interactivity-toggle{flex-shrink:0;height:42px;margin-left:auto;padding:0 14px;border:1px solid #d6dfeb;border-radius:21px;background:#fff;color:#2867d4;cursor:pointer;font-size:13px;font-weight:700;white-space:nowrap}
+.interactivity-toggle:hover{background:#eef4ff;border-color:#8ab0ed}
+.interactivity-toggle.on{background:#2867d4;border-color:#2867d4;color:#fff}
+.interactivity-toggle:focus-visible{outline:2px solid #2867d4;outline-offset:2px}
+#top .interactivity-toggle:not([hidden])+.zoom-toggle{margin-left:8px!important}
+.dark-mode .interactivity-toggle{background:#2a3543;color:#e8edf5;border-color:#526176}
+.dark-mode .interactivity-toggle:hover{background:#3a4656}
+.dark-mode .interactivity-toggle.on{background:#2867d4;border-color:#5e91e6;color:#fff}
+.external-link-bar{position:absolute;z-index:30;top:calc(100% + 8px);left:28px;right:28px;display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid #e5b93f;border-radius:8px;background:#fff7d6;color:#243244;box-shadow:0 6px 20px #24324433}
+.external-link-text{display:flex;flex-direction:column;min-width:0;flex:1;font-size:12px}
+.external-link-host{font-size:14px}
+.external-link-url{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:#526273}
+.external-link-bar button{flex-shrink:0;height:32px;padding:0 14px;border-radius:6px;border:1px solid #d4dce5;background:#fff;color:#243244;cursor:pointer;font-weight:700}
+.external-link-bar .external-link-open{background:#2867d4;border-color:#2867d4;color:#fff}
+.dark-mode .external-link-bar{background:#3a3420;border-color:#8e8041;color:#e8edf5}
+.dark-mode .external-link-url{color:#c9c3a8}
+.dark-mode .external-link-bar .external-link-cancel{background:#2a3543;color:#e8edf5;border-color:#526176}
