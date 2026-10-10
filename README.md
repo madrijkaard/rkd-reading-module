@@ -1,4 +1,6 @@
-# Lumen Module
+<p align="center"><img src="assets/logo.png" alt="Firefly Module logo" width="160"></p>
+
+# Firefly Module
 
 <p align="center">
   A focused desktop reader for DOCX, PDF and XLSX documents, built for a clean and comfortable reading experience.
@@ -12,7 +14,7 @@
 
 ## ✨ About the project
 
-Lumen Module is a desktop application for loading, browsing, searching, and reading DOCX, PDF and XLSX files. Documents are rendered locally in a simple two-pane interface: a document library on the left and the reading area on the right.
+Firefly Module is a desktop application for loading, browsing, searching, and reading DOCX, PDF and XLSX files. Documents are rendered locally in a simple two-pane interface: a document library on the left and the reading area on the right.
 
 The application works entirely in memory during the current session. It does not require a backend, database, or account.
 
